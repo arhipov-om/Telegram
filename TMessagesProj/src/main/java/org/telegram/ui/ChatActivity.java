@@ -1645,6 +1645,7 @@ public class ChatActivity extends BaseFragment implements
     private final static int chat_menu_attach = 14;
     private final static int chat_menu_search = -1;
     private final static int chat_menu_options = -2;
+    private final static int self_ban_channel = 9957;
     private final static int chat_menu_edit_text_options = -3;
     private final static int clear_history = 15;
     private final static int delete_chat = 16;
@@ -2711,6 +2712,40 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private NotificationCenter.ObserversGroup observersGroup;
+
+    private void showSelfBanDialog() {
+        if (currentChat == null || !ChatObject.isChannel(currentChat) || getParentActivity() == null) {
+            return;
+        }
+        final long channelId = currentChat.id;
+        final CharSequence[] choices = { "1 день", "7 дней", "30 дней", "90 дней" };
+        final long[] durations = { 86400000L, 604800000L, 2592000000L, 7776000000L };
+        new AlertDialog.Builder(getParentActivity())
+            .setTitle("Самозапрет канала")
+            .setItems(choices, (dialog, which) -> {
+                if (which < 0 || which >= durations.length) return;
+                new AlertDialog.Builder(getParentActivity())
+                    .setTitle("Подтвердить самозапрет")
+                    .setMessage("Заблокировать этот канал на " + choices[which] + "? Досрочная отмена в приложении не предусмотрена.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Заблокировать", (confirm, button) -> {
+                        try {
+                            org.telegram.selfban.StrictChannelBanStore store =
+                                new org.telegram.selfban.StrictChannelBanStore(
+                                    new org.telegram.selfban.AndroidBanStorage(getParentActivity().getApplicationContext(), currentAccount),
+                                    System::currentTimeMillis);
+                            store.ban(channelId, durations[which]);
+                            finishFragment();
+                        } catch (java.io.IOException | ArithmeticException e) {
+                            org.telegram.messenger.FileLog.e(e);
+                            new AlertDialog.Builder(getParentActivity())
+                                .setMessage("Не удалось сохранить самозапрет")
+                                .setPositiveButton("OK", null)
+                                .show();
+                        }
+                    }).show();
+            }).show();
+    }
 
     @Override
     public boolean onFragmentCreate() {
@@ -3934,6 +3969,8 @@ public class ChatActivity extends BaseFragment implements
                         args.putBoolean("addContact", true);
                         presentFragment(new ContactAddActivity(args));
                     }
+                } else if (id == self_ban_channel) {
+                    showSelfBanDialog();
                 } else if (id == mute) {
                     toggleMute(false);
                 } else if (id == add_shortcut) {
@@ -4357,6 +4394,9 @@ public class ChatActivity extends BaseFragment implements
             });
             otherIcon.addView(headerItem.getIconView());
             headerItem.setContentDescription(LocaleController.getString(R.string.AccDescrMoreOptions));
+            if (currentChat != null && ChatObject.isChannel(currentChat)) {
+                headerItem.lazilyAddSubItem(self_ban_channel, R.drawable.msg_block, "Самозапрет");
+            }
 
             if (currentUser != null && currentUser.self && chatMode != MODE_SAVED) {
                 savedChatsItem = headerItem.lazilyAddSubItem(view_as_topics, R.drawable.msg_topics, LocaleController.getString(R.string.SavedViewAsChats));
