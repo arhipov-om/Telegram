@@ -17,7 +17,7 @@ jobs:
       SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY_BASE64 }}
       SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
       SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+      SIGNING_KEY_ALIAS: self-ban
       EXPECTED_CERT_SHA256: 06fdc5264932543b6df2dda3248f770846cfb26a96bdb9e5dd62bd1acc1fde66
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +29,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: '' # avoid obsolete 'tools' package; install required packages below
       - name: Install Android SDK and NDK
         run: |
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
