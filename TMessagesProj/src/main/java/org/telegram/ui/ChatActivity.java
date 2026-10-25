@@ -2823,6 +2823,24 @@ public class ChatActivity extends BaseFragment implements
                     return false;
                 }
             }
+            // Central ChatActivity entry guard: covers normal chat navigation,
+            // search results and links that resolve to this chat.
+            if (ChatObject.isChannel(currentChat)) {
+                try {
+                    org.telegram.selfban.StrictChannelBanStore selfBanStore =
+                        new org.telegram.selfban.StrictChannelBanStore(
+                            new org.telegram.selfban.AndroidBanStorage(
+                                org.telegram.messenger.ApplicationLoader.applicationContext, currentAccount),
+                            System::currentTimeMillis);
+                    if (selfBanStore.isBlocked(chatId)) {
+                        return false;
+                    }
+                } catch (java.io.IOException | RuntimeException e) {
+                    // Fail closed: a corrupt/unreadable ban file must not unlock channels.
+                    FileLog.e(e);
+                    return false;
+                }
+            }
             if (ChatObject.isMonoForum(currentChat)) {
                 chatMode = MODE_SUGGESTIONS;
                 isSubscriberSuggestions = !ChatObject.canManageMonoForum(currentAccount, currentChat);
