@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    if: github.repository == 'arhipov-om/Telegram' && github.ref == 'refs/heads/feature/self-ban'
+    if: github.repository == 'arhipov-om/Telegram'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
