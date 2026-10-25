@@ -51,7 +51,7 @@ jobs:
           s = props.read_text()
           for k, v in [('RELEASE_STORE_PASSWORD', 'SIGNING_STORE_PASSWORD'), ('RELEASE_KEY_PASSWORD', 'SIGNING_KEY_PASSWORD'), ('RELEASE_KEY_ALIAS', 'SIGNING_KEY_ALIAS')]:
               val = os.environ[v]
-              if any(c in val for c in '\\n\r'): raise SystemExit('Unsupported newline in secret')
+              if any(c in val for c in '\n\r'): raise SystemExit('Unsupported newline in secret')
               s = re.sub(r'(?m)^'+k+r'=.*$', lambda _: k+'='+val, s)
           s = re.sub(r'(?m)^APP_PACKAGE=.*$', 'APP_PACKAGE=org.telegram.messenger.beta', s)
           # output code = APP_VERSION_CODE*10+9; must exceed previous 71840
@@ -70,12 +70,12 @@ jobs:
           keytool -list -keystore TMessagesProj/config/release.keystore -storetype PKCS12 -storepass "$SIGNING_STORE_PASSWORD" -alias "$SIGNING_KEY_ALIAS" -v > /tmp/key-info.txt
           fingerprint=$(sed -n 's/.*SHA256: //p' /tmp/key-info.txt | head -n1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
           if [[ "$fingerprint" != "$EXPECTED_CERT_SHA256" ]]; then echo "::error::Signing certificate mismatch"; exit 1; fi
-      - name: Build arm64-compatible beta APK
+      - name: Build beta APK (self-ban integration is not yet complete)
         run: ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon
-      - name: Upload unsigned-for-publication test artifact
+      - name: Upload signed test artifact (not a validated self-ban release)
         uses: actions/upload-artifact@v4
         with:
-          name: self-ban-beta-test-apk
+          name: telegram-beta-unverified-self-ban
           path: TMessagesProj_App/build/outputs/apk/afat/release/*.apk
           if-no-files-found: error
           retention-days: 7
