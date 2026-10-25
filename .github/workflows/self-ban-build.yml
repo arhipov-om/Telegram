@@ -1,0 +1,85 @@
+name: Self-ban Android APK (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'arhipov-om/Telegram' && github.ref == 'refs/heads/feature/self-ban'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      TG_API_ID: ${{ secrets.TG_API_ID }}
+      TG_API_HASH: ${{ secrets.TG_API_HASH }}
+      SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY_BASE64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+      EXPECTED_CERT_SHA256: 06fdc5264932543b6df2dda3248f770846cfb26a96bdb9e5dd62bd1acc1fde66
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          for var in TG_API_ID TG_API_HASH SIGNING_KEY_BASE64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_KEY_ALIAS; do
+            if [[ -z "${!var}" ]]; then echo "::error::Missing secret $var"; exit 1; fi
+          done
+          [[ "$TG_API_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid TG_API_ID"; exit 1; }
+          [[ "$TG_API_HASH" =~ ^[a-fA-F0-9]{32}$ ]] || { echo "::error::Invalid TG_API_HASH"; exit 1; }
+      - name: Inject build credentials without printing them
+        shell: bash
+        run: |
+          umask 077
+          printf '%s' "$SIGNING_KEY_BASE64" | base64 --decode > TMessagesProj/config/release.keystore
+          python3 - <<'PY'
+          import os, pathlib, re
+          props = pathlib.Path('gradle.properties')
+          s = props.read_text()
+          for k, v in [('RELEASE_STORE_PASSWORD', 'SIGNING_STORE_PASSWORD'), ('RELEASE_KEY_PASSWORD', 'SIGNING_KEY_PASSWORD'), ('RELEASE_KEY_ALIAS', 'SIGNING_KEY_ALIAS')]:
+              val = os.environ[v]
+              if any(c in val for c in '\\n\r'): raise SystemExit('Unsupported newline in secret')
+              s = re.sub(r'(?m)^'+k+r'=.*$', lambda _: k+'='+val, s)
+          s = re.sub(r'(?m)^APP_PACKAGE=.*$', 'APP_PACKAGE=org.telegram.messenger.beta', s)
+          # output code = APP_VERSION_CODE*10+9; must exceed previous 71840
+          s = re.sub(r'(?m)^APP_VERSION_CODE=.*$', 'APP_VERSION_CODE=7185', s)
+          props.write_text(s)
+          p = pathlib.Path('TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java')
+          s = p.read_text()
+          s, n1 = re.subn(r'public static int APP_ID = \d+;', lambda _: 'public static int APP_ID = '+os.environ['TG_API_ID']+';', s, count=1)
+          s, n2 = re.subn(r'public static String APP_HASH = "[^"]*";', lambda _: 'public static String APP_HASH = "'+os.environ['TG_API_HASH']+'";', s, count=1)
+          if n1 != 1 or n2 != 1: raise SystemExit('BuildVars fields not found')
+          p.write_text(s)
+          PY
+      - name: Verify signing certificate
+        shell: bash
+        run: |
+          keytool -list -keystore TMessagesProj/config/release.keystore -storetype PKCS12 -storepass "$SIGNING_STORE_PASSWORD" -alias "$SIGNING_KEY_ALIAS" -v > /tmp/key-info.txt
+          fingerprint=$(sed -n 's/.*SHA256: //p' /tmp/key-info.txt | head -n1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          if [[ "$fingerprint" != "$EXPECTED_CERT_SHA256" ]]; then echo "::error::Signing certificate mismatch"; exit 1; fi
+      - name: Build arm64-compatible beta APK
+        run: ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon
+      - name: Upload unsigned-for-publication test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-ban-beta-test-apk
+          path: TMessagesProj_App/build/outputs/apk/afat/release/*.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Cleanup signing material
+        if: always()
+        run: |
+          rm -f TMessagesProj/config/release.keystore /tmp/key-info.txt
