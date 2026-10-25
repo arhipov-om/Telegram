@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
+      FIREBASE_GOOGLE_SERVICES_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_BASE64 }}
       TG_API_ID: ${{ secrets.TG_API_ID }}
       TG_API_HASH: ${{ secrets.TG_API_HASH }}
       SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY_BASE64 }}
@@ -42,6 +43,29 @@ jobs:
           done
           [[ "$TG_API_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid TG_API_ID"; exit 1; }
           [[ "$TG_API_HASH" =~ ^[a-fA-F0-9]{32}$ ]] || { echo "::error::Invalid TG_API_HASH"; exit 1; }
+      - name: Install and validate private Firebase configuration
+        shell: bash
+        run: |
+          if [[ -z "$FIREBASE_GOOGLE_SERVICES_BASE64" ]]; then
+            echo "::error::Missing FIREBASE_GOOGLE_SERVICES_BASE64 secret. Create a Firebase project with Android app org.telegram.messenger.beta and add its google-services.json as a base64 GitHub Actions secret."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_BASE64" | base64 --decode > TMessagesProj/google-services.json
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path('TMessagesProj/google-services.json')
+          data = json.loads(p.read_text())
+          project = data.get('project_info', {}).get('project_id', '')
+          packages = [c.get('client_info', {}).get('android_client_info', {}).get('package_name') for c in data.get('client', [])]
+          if 'org.telegram.messenger.beta' not in packages:
+              raise SystemExit('Firebase config has no org.telegram.messenger.beta Android client')
+          if project == 'tmessages2':
+              raise SystemExit('Refusing upstream Telegram Firebase project: provide your own Firebase project')
+          if not project:
+              raise SystemExit('Firebase project_id is missing')
+          print('Private Firebase config validated for org.telegram.messenger.beta')
+          PY
       - name: Inject build credentials without printing them
         shell: bash
         run: |
@@ -85,3 +109,4 @@ jobs:
         if: always()
         run: |
           rm -f TMessagesProj/config/release.keystore /tmp/key-info.txt
+          git checkout -- TMessagesProj/google-services.json || true
